@@ -1,0 +1,21 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Folder Data & Output Scraping
+data/
+dataset/
+*.json
+*.jsonl
+
+.streamlit/
+
+.DS_Store
+Thumbs.db
