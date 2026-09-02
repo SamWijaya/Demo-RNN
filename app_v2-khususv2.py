@@ -367,7 +367,11 @@ def clean_raw_steam_review(text):
 def get_game_name(app_id):
     try:
         url = "http://store.steampowered.com/api/appdetails"
-        params = {"appids": app_id}
+        params = {
+            "appids": app_id,
+            "l": "english",
+            "cc": "us"
+        }
         response = requests.get(url, params=params)
         data = response.json()
         if str(app_id) in data and data[str(app_id)]['success']:
