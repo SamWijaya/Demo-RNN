@@ -431,6 +431,21 @@ with col_model:
         "Pilih Arsitektur Model untuk Analisis:",
         ("BiLSTM", "BiGRU", "SimpleRNN")
     )
+    with st.expander(f"Info & Performa Model {model_choice}", expanded=False):
+        st.markdown("**Hasil Evaluasi F1-Score (Test Set)**")
+        col_met1, col_met2 = st.columns(2)
+        
+        if model_choice == "BiLSTM":
+            col_met1.metric(label="Partial Match", value="63.15%")
+            col_met2.metric(label="Strict Match", value="47.08%")
+
+        elif model_choice == "BiGRU":
+            col_met1.metric(label="Partial Match", value="63.77%")
+            col_met2.metric(label="Strict Match", value="47.71%")
+
+        elif model_choice == "SimpleRNN":
+            col_met1.metric(label="Partial Match", value="64.02%")
+            col_met2.metric(label="Strict Match", value="46.62%")
 
 with st.spinner(f"Sedang memuat model {model_choice}..."):
     try:
