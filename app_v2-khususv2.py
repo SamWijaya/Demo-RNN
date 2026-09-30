@@ -642,8 +642,8 @@ with tab2:
                     "json": 1,
                     "language": "english",
                     "num_per_page": 100,
-                    "playtime_filter_min": 2,
-                    "filter": "recent",
+                    # "playtime_filter_min": 2,
+                    # "filter": "recent",
                     "cursor": cursor
                 }
                 
@@ -660,7 +660,7 @@ with tab2:
                             time.sleep(1)
                         
                         req_count = 0
-                        status_text.text(f"Melanjutkan pengunduhan... {len(processed_data)}/{limit} review unik")
+                        status_text.text(f"Melanjutkan pengunduhan... {len(processed_data)}/{limit} review")
                         
                         if res.status_code == 429:
                             continue 
@@ -701,7 +701,7 @@ with tab2:
                     
                     current_count = len(processed_data)
                     progress_bar.progress(min(current_count / limit, 1.0))
-                    status_text.text(f"Mengunduh... {current_count}/{limit} review unik")
+                    status_text.text(f"Mengunduh... {current_count}/{limit} review")
                     
                     time.sleep(0.5)
                         
@@ -711,7 +711,7 @@ with tab2:
 
             if processed_data:
                 progress_bar.progress(1.0)
-                status_text.success(f"Scraping Selesai! Berhasil mengunduh {len(processed_data)} review unik.")
+                status_text.success(f"Scraping Selesai! Berhasil mengunduh {len(processed_data)} review.")
                 
                 jsonl_str = "\n".join([json.dumps(x, ensure_ascii=False) for x in processed_data])
                 st.session_state.download_data = jsonl_str
