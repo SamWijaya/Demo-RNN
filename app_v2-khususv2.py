@@ -572,7 +572,7 @@ with tab2:
     
     col_app, _ = st.columns([1, 2])
     with col_app:
-        app_id_input = st.text_input("Masukkan Steam App ID (Contoh: 949230 dan 3595270):", value="")
+        app_id_input = st.text_input("Masukkan Steam App ID (Contoh: 949230, 1086940 atau 3595270):", value="")
     
     if st.session_state.preview_data and str(st.session_state.preview_data['app_id']) != app_id_input:
         st.session_state.preview_data = None
