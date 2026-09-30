@@ -697,14 +697,18 @@ with tab2:
                         break
                     cursor = new_cursor
                     
-                    if req_count >= 150 and current_count < limit:
-                        status_text.warning("Tercapai batas aman akses Steam (150 request). Memulai cooldown 5 menit...")
-                        for sec_remaining in range(300, 0, -1):
-                            mins, secs = divmod(sec_remaining, 60)
-                            status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
-                            time.sleep(1)
-                        req_count = 0
-                        status_text.text(f"Melanjutkan pengunduhan... {current_count}/{limit} review")
+                    if req_count >= 150:
+                        if limit <= 15000:
+                            status_text.warning(f"Limit API tercapai. Menghentikan scraping di {current_count} ulasan agar tidak terkena cooldown.")
+                            break
+                        elif current_count < limit:
+                            status_text.warning("Tercapai limit akses Steam (150 request). Memulai cooldown 5 menit...")
+                            for sec_remaining in range(300, 0, -1):
+                                mins, secs = divmod(sec_remaining, 60)
+                                status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
+                                time.sleep(1)
+                            req_count = 0
+                            status_text.text(f"Melanjutkan pengunduhan... {current_count}/{limit} review")
                     
                     time.sleep(0.5)
                         
