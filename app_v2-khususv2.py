@@ -107,12 +107,14 @@ def load_model(model_name):
     checkpoint_path = f"models/{model_name}_best.pt"
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
+    # Ekstraksi metadata, kamus kata (w2i), dan kamus tag (t2i)
     w2i = checkpoint["word2idx"]
     t2i = checkpoint["tag2idx"]
     i2t = checkpoint["idx2tag"]
     config = checkpoint["config"]
     m_type = checkpoint["model_type"]
-    
+
+    # Inisialisasi arsitektur dan pemuatan state dictionary
     vocab_size = len(w2i)
     dummy_embedding = np.zeros((vocab_size, 300))
     pad_idx = w2i["PAD"]
@@ -182,21 +184,23 @@ def extract_entities_robust(predictions):
 # ==========================================
 # Fungsi untuk input teks tunggal (Satu per satu)
 def predict_ner(text, model, w2i, i2t, max_len, device):
+    # Pembersihan teks awal dan normalisasi spasi pada tanda baca
     text = str(text).strip()
     text = re.sub(r'([:.,!?()])', r' \1 ', text) 
     text = re.sub(r'\s+', ' ', text).strip()
-    
     words = text.split()
+
+    # Konversi token kata ke indeks berbasis vocabulary model
     if not words:
         return []
-        
     x_idx = [w2i.get(w, w2i["UNK"]) for w in words]
     result = []
-    
     safe_punct = {'.', ',', '!', '?', ';', '\n'}
-    
+
     i = 0
     while i < len(words):
+        # Logika pemotongan panjang teks (chunking) agar sesuai max_len dengan memprioritaskan tanda baca sebagai batas potong (safe cut)
+
         chunk_end = i + max_len
         
         if chunk_end >= len(words):
@@ -217,7 +221,8 @@ def predict_ner(text, model, w2i, i2t, max_len, device):
         pad_length = max_len - len(chunk_idx)
         padded_chunk = chunk_idx + [w2i["PAD"]] * pad_length
         x_tensor = torch.tensor([padded_chunk], dtype=torch.long).to(device)
-        
+
+        # Eksekusi inferensi model untuk mendapatkan label prediksi BILOU
         with torch.no_grad():
             preds = model(x_tensor)[0]
             
@@ -295,21 +300,25 @@ def clean_unicode(text):
     if not text: return ""
     return str(text).replace('\u2028', ' ').replace('\u2029', ' ')
 
-def parse_steam_checklist_perfect(text):
+def parse_steam_checklist(text):
     if not text: 
         return ""
     
+    # Memisahkan teks berdasarkan baris baru
     lines = text.replace('\r', '').split('\n')
     output_parts = []
     
+    # Regex untuk mendeteksi header kategori (contoh: --- Graphics ---)
     header_regex = re.compile(r'^[-=~_]{2,}\s*[\{\[\(]?\s*(.*?)\s*[\}\]\)]?\s*[-=~_]{2,}$')
     
+    # Regex untuk mendeteksi opsi yang dicentang maupun tidak
     checked_regex = re.compile(r'^[\s]*([☑✅✔️]|\[x\]|\[X\]|\(\+\))\s*(.*)$', re.IGNORECASE)
     unchecked_regex = re.compile(r'^[\s]*([☐⬛🔲⬜]|\[ \]|\[\]|\( \))\s*(.*)$')
     
     current_header = None
     current_items = []
     
+    # Fungsi bantuan untuk merangkai header dengan opsi yang dicentang
     def flush_checklist():
         if current_items:
             joined_items = ", ".join(current_items)
@@ -319,20 +328,24 @@ def parse_steam_checklist_perfect(text):
                 output_parts.append(f"{joined_items},")
             current_items.clear()
 
+    # Memindai setiap baris teks ulasan
     for line in lines:
         original_line = line.strip()
         if not original_line:
             continue
             
+        # Jika menemukan header, simpan sebagai kategori saat ini
         header_match = header_regex.match(original_line)
         if header_match:
             flush_checklist() 
             current_header = header_match.group(1).strip()
             continue
             
+        # Abaikan/hapus baris opsi yang tidak dicentang (unchecked)
         if unchecked_regex.match(original_line):
             continue
             
+        # Ekstrak dan bersihkan teks dari opsi yang dicentang (checked)
         checked_match = checked_regex.match(original_line)
         if checked_match:
             raw_val = checked_match.group(2).strip()
@@ -341,24 +354,28 @@ def parse_steam_checklist_perfect(text):
                 current_items.append(clean_value)
             continue
             
+        # Jika baris adalah narasi biasa (bukan format checklist)
         flush_checklist()
         current_header = None
         output_parts.append(original_line)
         
     flush_checklist()
+    # Menggabungkan seluruh hasil menjadi satu teks naratif standar
     return " ".join(output_parts)
 
 def clean_raw_steam_review(text):
     if not text: return ""
-    
+
+    # Pembersihan tag BBCode dan HTML
     bbcode_tags = r'/?(h[1-6]|b|u|i|strike|spoiler|noparse|hr|list|table|th|tr|td|url|img|\*)'
     bb_pattern = r'\[' + bbcode_tags + r'(?:=[^\]]+)?\]'
     text = re.sub(bb_pattern, ' ', text, flags=re.IGNORECASE)
-    
     text = re.sub(r'<[^>]+>', ' ', text)
-    
-    text = parse_steam_checklist_perfect(text)
-    
+
+    # Penguraian khusus untuk format checklist Steam
+    text = parse_steam_checklist(text)
+
+    # Pembersihan Unicode dan normalisasi spasi
     text = clean_unicode(text)
     text = re.sub(r'\s+', ' ', text).strip()
     
@@ -613,114 +630,95 @@ with tab2:
             game_title = data['game_name']
             processed_data = []
             
-            if scrape_mode == "Semua Review (Full Download)":
-                with st.spinner("Sedang mengambil semua data (bisa memakan waktu lama jika terkena cooldown)..."):
-                    req_params = {"json": "1", "language": "english", "num_per_page": "100", "playtime_filter_min": "2"}
-                    review_dict, query_count = steamreviews.download_reviews_for_app_id(
-                        app_id, chosen_request_params=req_params
-                    )
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            cursor = "*"
+            seen_review_ids = set()
+            req_count = 0
+
+            while len(processed_data) < limit:
+                params = {
+                    "json": 1,
+                    "language": "english",
+                    "num_per_page": 100,
+                    "playtime_filter_min": 2,
+                    "filter": "recent",
+                    "cursor": cursor
+                }
+                
+                try:
+                    res = requests.get(f"https://store.steampowered.com/appreviews/{app_id}", params=params)
+                    req_count += 1
                     
-                    if review_dict and 'reviews' in review_dict:
-                        for review_id, review_data in review_dict["reviews"].items():
-                            item = {
-                                "review_id": review_id,
-                                "app_id": app_id,
-                                "game_name": game_title,
-                                "steamid": review_data["author"]["steamid"],
-                                "playtime_forever": review_data["author"]["playtime_forever"],
-                                "review": clean_raw_steam_review(review_data["review"]),
-                                "voted_up": review_data["voted_up"]
-                            }
-                            processed_data.append(item)
-                            
-            else:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                cursor = "*"
-                seen_review_ids = set()
-                req_count = 0
-
-                while len(processed_data) < limit:
-                    params = {
-                        "json": 1,
-                        "language": "english",
-                        "num_per_page": 100,
-                        "playtime_filter_min": 2,
-                        "filter": "recent",
-                        "cursor": cursor
-                    }
+                    if res.status_code == 429 or req_count == 150:
+                        status_text.warning("Tercapai batas akses Steam. Memulai cooldown 5 menit untuk mencegah blokir IP...")
+                        
+                        for sec_remaining in range(300, 0, -1):
+                            mins, secs = divmod(sec_remaining, 60)
+                            status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
+                            time.sleep(1)
+                        
+                        req_count = 0
+                        status_text.text(f"Melanjutkan pengunduhan... {len(processed_data)}/{limit} review unik")
+                        
+                        if res.status_code == 429:
+                            continue 
                     
-                    try:
-                        res = requests.get(f"https://store.steampowered.com/appreviews/{app_id}", params=params)
-                        req_count += 1
-                        
-                        if res.status_code == 429 or req_count == 150:
-                            status_text.warning("Tercapai batas akses Steam. Memulai cooldown 5 menit untuk mencegah blokir IP...")
-                            
-                            for sec_remaining in range(300, 0, -1):
-                                mins, secs = divmod(sec_remaining, 60)
-                                status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
-                                time.sleep(1)
-                            
-                            req_count = 0
-                            status_text.text(f"Melanjutkan pengunduhan... {len(processed_data)}/{limit} review unik")
-                            
-                            if res.status_code == 429:
-                                continue 
-                        
-                        if res.status_code != 200:
-                            st.error(f"Gagal mengambil data dari Steam. Status Code: {res.status_code}")
-                            break
-                            
-                        resp_data = res.json()
-                        
-                        if "reviews" in resp_data and resp_data["reviews"]:
-                            for review_data in resp_data["reviews"]:
-                                rev_id = review_data["recommendationid"]
-                                
-                                if rev_id not in seen_review_ids:
-                                    if len(processed_data) >= limit:
-                                        break
-                                    
-                                    seen_review_ids.add(rev_id)
-                                    
-                                    item = {
-                                        "review_id": rev_id,
-                                        "app_id": app_id,
-                                        "game_name": game_title,
-                                        "steamid": review_data["author"]["steamid"],
-                                        "playtime_forever": review_data["author"]["playtime_forever"],
-                                        "review": clean_raw_steam_review(review_data["review"]),
-                                        "voted_up": review_data["voted_up"]
-                                    }
-                                    processed_data.append(item)
-                            
-                            new_cursor = resp_data.get("cursor", cursor)
-
-                            if new_cursor == cursor:
-                                break
-                                
-                            cursor = new_cursor
-                            
-                            current_count = len(processed_data)
-                            progress_bar.progress(min(current_count / limit, 1.0))
-                            status_text.text(f"Mengunduh... {current_count}/{limit} review unik")
-                            
-                            time.sleep(0.5)
-                        else:
-                            break
-                            
-                    except Exception as e:
-                        st.error(f"Koneksi terputus: {e}")
+                    if res.status_code != 200:
+                        st.error(f"Gagal mengambil data dari Steam. Status Code: {res.status_code}")
                         break
-                progress_bar.empty()
+                        
+                    resp_data = res.json()
+                    
+                    if "reviews" in resp_data and resp_data["reviews"]:
+                        for review_data in resp_data["reviews"]:
+                            rev_id = review_data["recommendationid"]
+                            
+                            if rev_id not in seen_review_ids:
+                                if len(processed_data) >= limit:
+                                    break
+                                
+                                seen_review_ids.add(rev_id)
+                                
+                                item = {
+                                    "review_id": rev_id,
+                                    "app_id": app_id,
+                                    "game_name": game_title,
+                                    "steamid": review_data["author"]["steamid"],
+                                    "playtime_forever": review_data["author"]["playtime_forever"],
+                                    "review": clean_raw_steam_review(review_data["review"]),
+                                    "voted_up": review_data["voted_up"]
+                                }
+                                processed_data.append(item)
+                    
+                    new_cursor = resp_data.get("cursor", cursor)
+
+                    if new_cursor == cursor:
+                        break
+                        
+                    cursor = new_cursor
+                    
+                    current_count = len(processed_data)
+                    progress_bar.progress(min(current_count / limit, 1.0))
+                    status_text.text(f"Mengunduh... {current_count}/{limit} review unik")
+                    
+                    time.sleep(0.5)
+                        
+                except Exception as e:
+                    st.error(f"Koneksi terputus: {e}")
+                    break
 
             if processed_data:
+                progress_bar.progress(1.0)
+                status_text.success(f"Scraping Selesai! Berhasil mengunduh {len(processed_data)} review unik.")
+                
                 jsonl_str = "\n".join([json.dumps(x, ensure_ascii=False) for x in processed_data])
                 st.session_state.download_data = jsonl_str
                 st.session_state.download_filename = f"{app_id}_{game_title}_reviews.jsonl"
             else:
+                progress_bar.empty()
+                status_text.empty()
                 st.warning("Tidak ada review yang ditemukan.")
 
         if 'download_data' in st.session_state:
