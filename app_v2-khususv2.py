@@ -643,7 +643,7 @@ with tab2:
                     "language": "english",
                     "num_per_page": 100,
                     # "playtime_filter_min": 2,
-                    # "filter": "recent",
+                    "filter": "recent",
                     "cursor": cursor
                 }
                 
