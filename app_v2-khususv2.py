@@ -651,19 +651,15 @@ with tab2:
                     res = requests.get(f"https://store.steampowered.com/appreviews/{app_id}", params=params)
                     req_count += 1
                     
-                    if res.status_code == 429 or req_count == 150:
-                        status_text.warning("Tercapai batas akses Steam. Memulai cooldown 5 menit untuk mencegah blokir IP...")
-                        
+                    # Cek jika langsung diblokir oleh Steam (HTTP 429)
+                    if res.status_code == 429:
+                        status_text.warning("Terkena blokir sementara dari Steam (HTTP 429). Memulai cooldown 5 menit...")
                         for sec_remaining in range(300, 0, -1):
                             mins, secs = divmod(sec_remaining, 60)
                             status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
                             time.sleep(1)
-                        
                         req_count = 0
-                        status_text.text(f"Melanjutkan pengunduhan... {len(processed_data)}/{limit} review")
-                        
-                        if res.status_code == 429:
-                            continue 
+                        continue
                     
                     if res.status_code != 200:
                         st.error(f"Gagal mengambil data dari Steam. Status Code: {res.status_code}")
@@ -692,16 +688,23 @@ with tab2:
                                 }
                                 processed_data.append(item)
                     
-                    new_cursor = resp_data.get("cursor", cursor)
-
-                    if new_cursor == cursor:
-                        break
-                        
-                    cursor = new_cursor
-                    
                     current_count = len(processed_data)
                     progress_bar.progress(min(current_count / limit, 1.0))
                     status_text.text(f"Mengunduh... {current_count}/{limit} review")
+                    
+                    new_cursor = resp_data.get("cursor", cursor)
+                    if new_cursor == cursor or not resp_data.get("reviews"):
+                        break
+                    cursor = new_cursor
+                    
+                    if req_count >= 150 and current_count < limit:
+                        status_text.warning("Tercapai batas aman akses Steam (150 request). Memulai cooldown 5 menit...")
+                        for sec_remaining in range(300, 0, -1):
+                            mins, secs = divmod(sec_remaining, 60)
+                            status_text.warning(f"⏳ Cooldown aktif... Lanjut otomatis dalam {mins:02d}:{secs:02d}")
+                            time.sleep(1)
+                        req_count = 0
+                        status_text.text(f"Melanjutkan pengunduhan... {current_count}/{limit} review")
                     
                     time.sleep(0.5)
                         
