@@ -6,3 +6,5 @@ pandas
 steamreviews
 requests
 plotly
+wordcloud
+matplotlib

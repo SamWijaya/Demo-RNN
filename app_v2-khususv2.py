@@ -13,6 +13,8 @@ import os
 import time
 import random
 import plotly.express as px
+from wordcloud import WordCloud, STOPWORDS
+import matplotlib.pyplot as plt
 
 # VENV: .\.venv\Scripts\Activate.ps1
 
@@ -372,11 +374,12 @@ def clean_raw_steam_review(text):
     text = re.sub(bb_pattern, ' ', text, flags=re.IGNORECASE)
     text = re.sub(r'<[^>]+>', ' ', text)
 
-    # Penguraian khusus untuk format checklist Steam
+    # Penguraian khusus untuk format checklist Steam (harus sebelum hapus simbol/emoji)
     text = parse_steam_checklist(text)
 
-    # Pembersihan Unicode dan normalisasi spasi
+    # Pembersihan Unicode, Emoji, dan karakter non-Latin
     text = clean_unicode(text)
+    text = re.sub(r'[^a-zA-Z0-9\s.,!?\'\-/()$€£:]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     
     return text
@@ -795,6 +798,9 @@ with tab3:
                     
                     game_entity_counts = Counter()
                     game_analysis_results = []
+
+                    positive_phrases = []
+                    negative_phrases = []
                     
                     texts_to_process = [rev.get("review", "") for rev in reviews]
                     batch_predictions = []
@@ -823,6 +829,11 @@ with tab3:
                             
                             game_entity_counts[base_label] += 1
                             found_entities_str.append(f"{base_label} (\"{phrase}\")")
+                            
+                            if "positive" in base_label:
+                                positive_phrases.append(phrase)
+                            elif "negative" in base_label:
+                                negative_phrases.append(phrase)
                         
                         game_analysis_results.append({
                             "Review ID": review_obj.get("review_id", "N/A"),
@@ -892,6 +903,98 @@ with tab3:
                             st.info("Belum ada entitas yang bisa disimpulkan dari ulasan ini.")
                         
                     st.divider() 
+
+                    st.subheader(f"☁️ Word Cloud ({game_name})")
+
+                    custom_stopwords = set(STOPWORDS)
+                    custom_stopwords.update([
+                        # Kata umum di review game & kata kerja bantu
+                        "game", "games", "play", "playing", "played", "player", "players",
+                        "really", "very", "much", "lot", "bit", "still", "even", "quite",
+                        "make", "makes", "made", "feel", "feels", "felt", "look", "looks",
+                        "way", "thing", "things", "time", "hours", "overall", "pretty",
+                        "absolutely", "completely", "totally", "super", "extremely", "highly",
+                        "amount", "different", "engaging", "genuinely", "ton", "lots", "truly",
+                        "real", "meaningful", "work", "every", "many", "some", "few", "sometimes",
+                        "will", "would", "could", "should", "might", "must", "kinda", "often", "ass",
+                        "deep", "absurd", "ridiculous", "unfortunately", "unrealistic", "unbelievable",
+                        "seem", "seems", "seemed", "become", "becomes", "get", "gets", "end", "part",
+                        "nothing", "done", "doing", "actually", "literally", "basically",
+                        "definitely", "seriously", "honestly", "got", "run", "little", "long", "short",
+                        "small", "big", "massive", "tiny", "without", "enough", "never", "ever", "always",
+                        "steep", "looking", "far", "He", "She", "it", "t",
+                        "don", "didn", "doesn", "wasn", "won", "couldn", "wouldn",
+
+                        # Kata sentimen POSITIF umum (dihapus karena sudah diwakili kolom Positif)
+                        "good", "great", "best", "nice", "amazing", "awesome", "fantastic",
+                        "excellent", "wonderful", "perfect", "brilliant", "incredible", "superb",
+                        "love", "loved", "loving", "like", "liked", "enjoy", "enjoyed", "enjoyable",
+                        "fun", "solid", "decent", "fine", "cool", "well", "better", "favorite",
+                        "masterpiece", "phenomenal", "stunning", "beautiful", "gorgeous", "incredibly",
+                        "insane", "impressive", "memorable", "huge", "full", "top", 
+
+                        # Kata sentimen NEGATIF umum (dihapus karena sudah diwakili kolom Negatif)
+                        "bad", "worse", "worst", "terrible", "horrible", "awful", "poor", "trash",
+                        "garbage", "rubbish", "suck", "sucks", "hate", "hated", "annoying",
+                        "disappointing", "disappointed", "boring", "bored", "mediocre", "meh",
+                        "lack", "lacks", "lacking", "issue", "issues", "problem", "problems", "wrong",
+                        "stupid", "mess", "weird", "awkward", "ruined", "lame", "slog", "useless",
+                        "less", "isn", 
+
+                        # Kata lainnya
+                        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                        "S", "B", "Z", "T", "ve", "re", "m", "ll", "d", "de", "N", "R", "que", "och",
+                    ])
+
+                    def pos_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+                        return random.choice(["#2ECC71", "#4ADE80", "#34D399", "#10B981", "#6EE7B7", "#A7F3D0"])
+
+                    def neg_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+                        return random.choice(["#FF4B4B", "#F87171", "#EF4444", "#FB7185", "#FCA5A5", "#FF7675"])
+
+                    col_wc1, col_wc2 = st.columns(2)
+
+                    with col_wc1:
+                        with st.container(border=True):
+                            st.markdown("🟢 Aspek & Opini Positif")
+                            if positive_phrases:
+                                text_pos = " ".join(positive_phrases).lower()
+                                wc_pos = WordCloud(
+                                    width=1000, height=500, 
+                                    background_color="#0E1117",
+                                    stopwords=custom_stopwords,
+                                    color_func=pos_color_func,
+                                    max_words=80,
+                                    collocations=False,
+                                    prefer_horizontal=0.9,
+                                    margin=10,
+                                    regexp=r"\b[a-zA-Z]{2,}\b",
+                                ).generate(text_pos)
+                                
+                                st.image(wc_pos.to_array(), use_container_width=True)
+                            else:
+                                st.info("Tidak ada frasa positif untuk ditampilkan.")
+
+                    with col_wc2:
+                        with st.container(border=True):
+                            st.markdown("🔴 Aspek & Opini Negatif")
+                            if negative_phrases:
+                                text_neg = " ".join(negative_phrases).lower()
+                                wc_neg = WordCloud(
+                                    width=1000, height=500, 
+                                    background_color="#0E1117",
+                                    stopwords=custom_stopwords,
+                                    color_func=neg_color_func,
+                                    max_words=80,
+                                    collocations=False,
+                                    prefer_horizontal=0.9,
+                                    margin=10,
+                                    regexp=r"\b[a-zA-Z]{2,}\b",
+                                ).generate(text_neg)
+                                
+                                st.image(wc_neg.to_array(), use_container_width=True)
+                            else:
+                                st.info("Tidak ada frasa negatif untuk ditampilkan.")
                     
                 status_text.success("Analisis Batch Keseluruhan Selesai!")
                 progress_bar.empty()
