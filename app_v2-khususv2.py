@@ -192,7 +192,6 @@ def predict_ner(text, model, w2i, i2t, max_len, device):
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()
 
-    # Konversi token kata ke indeks berbasis vocabulary model
     if not words:
         return []
     x_idx = [w2i.get(w, w2i["UNK"]) for w in words]
@@ -201,8 +200,7 @@ def predict_ner(text, model, w2i, i2t, max_len, device):
 
     i = 0
     while i < len(words):
-        # Logika pemotongan panjang teks (chunking) agar sesuai max_len dengan memprioritaskan tanda baca sebagai batas potong (safe cut)
-
+        # Logika pemotongan panjang teks (chunking)
         chunk_end = i + max_len
         
         if chunk_end >= len(words):
@@ -224,7 +222,6 @@ def predict_ner(text, model, w2i, i2t, max_len, device):
         padded_chunk = chunk_idx + [w2i["PAD"]] * pad_length
         x_tensor = torch.tensor([padded_chunk], dtype=torch.long).to(device)
 
-        # Eksekusi inferensi model untuk mendapatkan label prediksi BILOU
         with torch.no_grad():
             preds = model(x_tensor)[0]
             
@@ -330,7 +327,6 @@ def parse_steam_checklist(text):
                 output_parts.append(f"{joined_items},")
             current_items.clear()
 
-    # Memindai setiap baris teks ulasan
     for line in lines:
         original_line = line.strip()
         if not original_line:
@@ -362,7 +358,6 @@ def parse_steam_checklist(text):
         output_parts.append(original_line)
         
     flush_checklist()
-    # Menggabungkan seluruh hasil menjadi satu teks naratif standar
     return " ".join(output_parts)
 
 def clean_raw_steam_review(text):
@@ -431,9 +426,9 @@ with col_head_right:
         with col_list1:
             st.markdown("""
             - **Gameplay** (mekanik, fitur, kontrol)
-            - **Performance** (bug, FPS, lag)
-            - **Graphics** (visual, animasi, art style)
             - **Story** (cerita, plot, karakter)
+            - **Graphics** (visual, animasi, art style)
+            - **Performance** (bug, FPS, lag)
             """)
             
         with col_list2:
@@ -749,6 +744,9 @@ with tab3:
     
     uploaded_files = st.file_uploader("Pilih file JSON/JSONL", type=['json', 'jsonl'], accept_multiple_files=True)
     
+    if 'batch_results' not in st.session_state:
+        st.session_state.batch_results = None
+
     if uploaded_files:
         grouped_reviews = {}
         total_reviews_read = 0
@@ -784,6 +782,7 @@ with tab3:
             
             st.write("")
 
+            # Proses Analisis
             if st.button("Mulai Analisis Batch", type="primary"):
                 if total_reviews_read == 0:
                     st.error("Tidak ada data review yang valid untuk dianalisis.")
@@ -794,13 +793,17 @@ with tab3:
                 current_progress = 0
                 max_length = config.get("max_len", 64)
                 
+                all_games_data = {}
+
                 for game_name, reviews in grouped_reviews.items():
-                    
                     game_entity_counts = Counter()
                     game_analysis_results = []
-
-                    positive_phrases = []
-                    negative_phrases = []
+                    
+                    phrases_by_aspect = {
+                        "positive": [],
+                        "negative": [],
+                        "detailed": {}
+                    }
                     
                     texts_to_process = [rev.get("review", "") for rev in reviews]
                     batch_predictions = []
@@ -830,10 +833,14 @@ with tab3:
                             game_entity_counts[base_label] += 1
                             found_entities_str.append(f"{base_label} (\"{phrase}\")")
                             
+                            if base_label not in phrases_by_aspect["detailed"]:
+                                phrases_by_aspect["detailed"][base_label] = []
+                            phrases_by_aspect["detailed"][base_label].append(phrase)
+                            
                             if "positive" in base_label:
-                                positive_phrases.append(phrase)
+                                phrases_by_aspect["positive"].append(phrase)
                             elif "negative" in base_label:
-                                negative_phrases.append(phrase)
+                                phrases_by_aspect["negative"].append(phrase)
                         
                         game_analysis_results.append({
                             "Review ID": review_obj.get("review_id", "N/A"),
@@ -841,163 +848,236 @@ with tab3:
                             "Teks Review": review_obj.get("review", ""),
                             "Detail Aspek Terdeteksi": " | ".join(found_entities_str) if found_entities_str else "None"
                         })
-                        
                     
-                    status_text.text(f"Menyiapkan visualisasi untuk {game_name}...")
-                    col_batch_kiri, col_batch_kanan = st.columns([2, 1])
-                    
-                    with col_batch_kanan:
-                        st.subheader(f"Total Aspek ({game_name})")
-                        if game_entity_counts:
-                            df_grand = pd.DataFrame(
-                                game_entity_counts.items(), 
-                                columns=["Aspek & Sentimen", "Total Frekuensi"]
-                            )
-                            df_grand = df_grand.sort_values(by="Total Frekuensi", ascending=False)
-                            st.dataframe(df_grand, hide_index=True, use_container_width=True)
-                            
-                            fig = px.pie(
-                                df_grand, 
-                                names="Aspek & Sentimen", 
-                                values="Total Frekuensi", 
-                                hole=0.4,
-                                title=f"Distribusi Analisis ({game_name})"
-                            )
-
-                            fig.update_traces(
-                                hovertemplate="<b>%{label}</b><br>%{value}<extra></extra>"
-                            )
-
-                            fig.update_layout(
-                                margin=dict(t=40, b=80, l=20, r=80)
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.info("Tidak ada entitas ditemukan.")
-                    
-                    with col_batch_kiri:
-                        st.subheader(f"Analisis Game: {game_name}")
-                        df_results = pd.DataFrame(game_analysis_results)
-                        st.dataframe(df_results, hide_index=True, use_container_width=True)
-                        
-                        st.write("---") 
-                        st.subheader("Highlight Analisis")
-                        
-                        if game_entity_counts:
-                            total_frekuensi_aspek = sum(game_entity_counts.values())
-                            aspek_terbanyak, frekuensi_terbanyak = game_entity_counts.most_common(1)[0]
-                            
-                            col_met1, col_met2, col_met3 = st.columns(3)
-                            with col_met1:
-                                st.metric(label="Total Ulasan Diproses", value=len(reviews))
-                            with col_met2:
-                                st.metric(label="Total Entitas Ditemukan", value=total_frekuensi_aspek)
-                            with col_met3:
-                                st.metric(
-                                    label="Paling Banyak Dibahas", 
-                                    value=aspek_terbanyak, 
-                                    delta=f"{frekuensi_terbanyak} kali kemunculan",
-                                    delta_color="off" 
-                                )
-                        else:
-                            st.info("Belum ada entitas yang bisa disimpulkan dari ulasan ini.")
-                        
-                    st.divider() 
-
-                    st.subheader(f"☁️ Word Cloud ({game_name})")
-
-                    custom_stopwords = set(STOPWORDS)
-                    custom_stopwords.update([
-                        # Kata umum di review game & kata kerja bantu
-                        "game", "games", "play", "playing", "played", "player", "players",
-                        "really", "very", "much", "lot", "bit", "still", "even", "quite",
-                        "make", "makes", "made", "feel", "feels", "felt", "look", "looks",
-                        "way", "thing", "things", "time", "hours", "overall", "pretty",
-                        "absolutely", "completely", "totally", "super", "extremely", "highly",
-                        "amount", "different", "engaging", "genuinely", "ton", "lots", "truly",
-                        "real", "meaningful", "work", "every", "many", "some", "few", "sometimes",
-                        "will", "would", "could", "should", "might", "must", "kinda", "often", "ass",
-                        "deep", "absurd", "ridiculous", "unfortunately", "unrealistic", "unbelievable",
-                        "seem", "seems", "seemed", "become", "becomes", "get", "gets", "end", "part",
-                        "nothing", "done", "doing", "actually", "literally", "basically",
-                        "definitely", "seriously", "honestly", "got", "run", "little", "long", "short",
-                        "small", "big", "massive", "tiny", "without", "enough", "never", "ever", "always",
-                        "steep", "looking", "far", "He", "She", "it", "t",
-                        "don", "didn", "doesn", "wasn", "won", "couldn", "wouldn",
-
-                        # Kata sentimen POSITIF umum (dihapus karena sudah diwakili kolom Positif)
-                        "good", "great", "best", "nice", "amazing", "awesome", "fantastic",
-                        "excellent", "wonderful", "perfect", "brilliant", "incredible", "superb",
-                        "love", "loved", "loving", "like", "liked", "enjoy", "enjoyed", "enjoyable",
-                        "fun", "solid", "decent", "fine", "cool", "well", "better", "favorite",
-                        "masterpiece", "phenomenal", "stunning", "beautiful", "gorgeous", "incredibly",
-                        "insane", "impressive", "memorable", "huge", "full", "top", 
-
-                        # Kata sentimen NEGATIF umum (dihapus karena sudah diwakili kolom Negatif)
-                        "bad", "worse", "worst", "terrible", "horrible", "awful", "poor", "trash",
-                        "garbage", "rubbish", "suck", "sucks", "hate", "hated", "annoying",
-                        "disappointing", "disappointed", "boring", "bored", "mediocre", "meh",
-                        "lack", "lacks", "lacking", "issue", "issues", "problem", "problems", "wrong",
-                        "stupid", "mess", "weird", "awkward", "ruined", "lame", "slog", "useless",
-                        "less", "isn", 
-
-                        # Kata lainnya
-                        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-                        "S", "B", "Z", "T", "ve", "re", "m", "ll", "d", "de", "N", "R", "que", "och",
-                    ])
-
-                    def pos_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
-                        return random.choice(["#2ECC71", "#4ADE80", "#34D399", "#10B981", "#6EE7B7", "#A7F3D0"])
-
-                    def neg_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
-                        return random.choice(["#FF4B4B", "#F87171", "#EF4444", "#FB7185", "#FCA5A5", "#FF7675"])
-
-                    col_wc1, col_wc2 = st.columns(2)
-
-                    with col_wc1:
-                        with st.container(border=True):
-                            st.markdown("🟢 Aspek & Opini Positif")
-                            if positive_phrases:
-                                text_pos = " ".join(positive_phrases).lower()
-                                wc_pos = WordCloud(
-                                    width=1000, height=500, 
-                                    background_color="#0E1117",
-                                    stopwords=custom_stopwords,
-                                    color_func=pos_color_func,
-                                    max_words=80,
-                                    collocations=False,
-                                    prefer_horizontal=0.9,
-                                    margin=10,
-                                    regexp=r"\b[a-zA-Z]{2,}\b",
-                                ).generate(text_pos)
-                                
-                                st.image(wc_pos.to_array(), use_container_width=True)
-                            else:
-                                st.info("Tidak ada frasa positif untuk ditampilkan.")
-
-                    with col_wc2:
-                        with st.container(border=True):
-                            st.markdown("🔴 Aspek & Opini Negatif")
-                            if negative_phrases:
-                                text_neg = " ".join(negative_phrases).lower()
-                                wc_neg = WordCloud(
-                                    width=1000, height=500, 
-                                    background_color="#0E1117",
-                                    stopwords=custom_stopwords,
-                                    color_func=neg_color_func,
-                                    max_words=80,
-                                    collocations=False,
-                                    prefer_horizontal=0.9,
-                                    margin=10,
-                                    regexp=r"\b[a-zA-Z]{2,}\b",
-                                ).generate(text_neg)
-                                
-                                st.image(wc_neg.to_array(), use_container_width=True)
-                            else:
-                                st.info("Tidak ada frasa negatif untuk ditampilkan.")
-                    
+                    all_games_data[game_name] = {
+                        "df_results": pd.DataFrame(game_analysis_results),
+                        "entity_counts": game_entity_counts,
+                        "phrases_by_aspect": phrases_by_aspect,
+                        "total_reviews": len(reviews)
+                    }
+                
+                st.session_state.batch_results = all_games_data
+                
                 status_text.success("Analisis Batch Keseluruhan Selesai!")
                 progress_bar.empty()
-                
+
         except Exception as e:
             st.error(f"Gagal membaca atau memproses file: {e}")
+
+    if st.session_state.batch_results:
+        for game_name, game_data in st.session_state.batch_results.items():
+            
+            df_results = game_data["df_results"]
+            game_entity_counts = game_data["entity_counts"]
+            phrases_by_aspect = game_data["phrases_by_aspect"]
+            
+            st.write("---")
+            st.markdown(f"### Visualisasi & Hasil: {game_name}")
+            col_batch_kiri, col_batch_kanan = st.columns([2, 1])
+            
+            with col_batch_kanan:
+                st.subheader(f"Total Aspek")
+                if game_entity_counts:
+                    df_grand = pd.DataFrame(
+                        game_entity_counts.items(), 
+                        columns=["Aspek & Sentimen", "Total Frekuensi"]
+                    )
+                    df_grand = df_grand.sort_values(by="Total Frekuensi", ascending=False)
+                    st.dataframe(df_grand, hide_index=True, use_container_width=True)
+                    
+                    fig = px.pie(
+                        df_grand, 
+                        names="Aspek & Sentimen", 
+                        values="Total Frekuensi", 
+                        hole=0.4,
+                        title=f"Distribusi Analisis"
+                    )
+                    fig.update_traces(hovertemplate="<b>%{label}</b><br>%{value}<extra></extra>")
+                    fig.update_layout(margin=dict(t=40, b=80, l=20, r=80))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Tidak ada entitas ditemukan.")
+            
+            with col_batch_kiri:
+                st.subheader(f"Detail Analisis Review")
+                
+                daftar_aspek_mentah = [aspek for aspek, _ in game_entity_counts.most_common()]
+                urutan_ta = ["gameplay", "story", "graphics", "performance", "audio", "price", "ooa"]
+                
+                def sort_key(aspek_name):
+                    for i, base in enumerate(urutan_ta):
+                        if base in aspek_name.lower():
+                            return i
+                    return 99
+                
+                daftar_aspek_mentah = sorted(daftar_aspek_mentah, key=sort_key)
+                daftar_aspek = ["Tampilkan Semua Label"] + daftar_aspek_mentah
+                
+                selected_aspek = st.selectbox(
+                    "🔍 Filter ulasan berdasarkan Aspek & Sentimen:", 
+                    options=daftar_aspek,
+                    key=f"filter_{game_name}"
+                )
+                
+                if selected_aspek == "Tampilkan Semua Label":
+                    df_tampil = df_results
+                else:
+                    df_tampil = df_results[df_results["Detail Aspek Terdeteksi"].str.contains(selected_aspek, regex=False, na=False)]
+                
+                st.markdown(f"Menampilkan **{len(df_tampil)}** ulasan.")
+                st.dataframe(df_tampil, hide_index=True, use_container_width=True)
+                
+                st.write("---") 
+                st.subheader("Highlight Analisis")
+                
+                if game_entity_counts:
+                    total_frekuensi_aspek = sum(game_entity_counts.values())
+                    aspek_terbanyak, frekuensi_terbanyak = game_entity_counts.most_common(1)[0]
+                    
+                    col_met1, col_met2, col_met3 = st.columns(3)
+                    with col_met1:
+                        st.metric(label="Total Ulasan Diproses", value=game_data["total_reviews"])
+                    with col_met2:
+                        st.metric(label="Total Entitas Ditemukan", value=total_frekuensi_aspek)
+                    with col_met3:
+                        st.metric(
+                            label="Paling Banyak Dibahas", 
+                            value=aspek_terbanyak, 
+                            delta=f"{frekuensi_terbanyak} kali",
+                            delta_color="off" 
+                        )
+                else:
+                    st.info("Belum ada entitas yang bisa disimpulkan dari ulasan ini.")
+            
+            st.divider()
+            st.subheader(f"☁️ Word Cloud ({game_name})")
+            if selected_aspek != "Tampilkan Semua Label":
+                st.caption(f"Menampilkan kata-kata spesifik untuk: **{selected_aspek}**")
+
+            custom_stopwords = set(STOPWORDS)
+            custom_stopwords.update([
+                # 1. Kata umum & Kata kerja bantu (Filler)
+                "game", "games", "play", "playing", "played", "player", "players",
+                "really", "very", "much", "lot", "bit", "still", "even", "quite", "too",
+                "make", "makes", "made", "feel", "feels", "felt", "look", "looks",
+                "way", "thing", "things", "time", "hours", "overall", "pretty",
+                "absolutely", "completely", "totally", "super", "extremely", "highly",
+                "amount", "different", "engaging", "genuinely", "ton", "lots", "truly",
+                "real", "meaningful", "work", "every", "many", "some", "few", "sometimes",
+                "will", "would", "could", "should", "might", "must", "kinda", "often",
+                "seem", "seems", "seemed", "become", "becomes", "get", "gets", "end",
+                "nothing", "done", "doing", "actually", "literally", "basically",
+                "definitely", "seriously", "honestly", "got", "run", "without", "enough", 
+                "never", "ever", "always", "steep", "looking", "far", "He", "She", "it", "t", 
+                "don", "didn", "doesn", "wasn", "won", "couldn", "wouldn", "part", "parts",
+                "side", "yet", "flow", "move", "aren", "ain", "wait", "asking", "that", "thats", 
+                "absolutly", "absolute", "damn", "straight", "waiting", "despite", "teyh", 
+                "already", "getting", "bros", "bro", "need", "half", "tag", "tags", "go", "goes", 
+                "dont", "complete", "right", "new", "true", "false", "address", "people", 
+                "guy", "put", "add", "tried", "said", "say", "times", "see", "took", 
+                "surprisingly", "another", "member", "members", "basic", "crap", "dear", 
+                "ignore", "forgot", "grown", "sorely", "main", "everything", "telling", 
+                "possible", "nearly", "harsh", "ease", "smaller", "dumbest", "keep", "keeps", 
+                "kept", "single", "sheer", "whatever", "insanely", "whether", "forever",
+                "kind", "unlimited", "rarely", "matter", "wonder", "became", "current", "sure", 
+                "give", "ive", "mention", "major", "minor", "piece", "anything", "going", 
+                "cracked", "freaking", "constant", "cause", "running", "allow", "after", 
+                "find", "may", "understand",
+
+                # 2. Filler Khas Review Steam
+                "review", "reviews", "recommend", "recommended", "buy", "bought", "purchase",
+                "purchased", "refund", "refunded", "sale", "discount", "pc", "early", "access",
+                "earlyaccess", "version", "update", "patch", "steam", "valve", "ea",
+
+                # 3. Spesifik Entitas Game Tertentu (Bisa disesuaikan jika ganti game)
+                "chinese", "china", "west", "chads", "chad", "chud", "monkey", "wukong",
+
+                # 4. Sentimen POSITIF Generik (Dihapus karena sentimen sudah diwakili warna/filter)
+                "good", "great", "best", "nice", "amazing", "awesome", "fantastic",
+                "excellent", "wonderful", "perfect", "brilliant", "incredible", "superb",
+                "love", "loved", "loving", "like", "liked", "enjoy", "enjoyed", "enjoyable",
+                "fun", "solid", "decent", "fine", "cool", "well", "better", "favorite",
+                "masterpiece", "phenomenal", "stunning", "beautiful", "gorgeous", "incredibly",
+                "insane", "impressive", "memorable", "huge", "full", "top", "fully", 
+                "okay", "ok", "alright", "mid", "acceptable", "outstanding",
+
+                # 5. Sentimen NEGATIF Generik (Dihapus karena sentimen sudah diwakili warna/filter)
+                "bad", "worse", "worst", "terrible", "horrible", "awful", "poor", "trash",
+                "garbage", "rubbish", "suck", "sucks", "hate", "hated", "annoying",
+                "disappointing", "disappointed", "boring", "bored", "mediocre", "meh",
+                "lack", "lacks", "lacking", "issue", "issues", "problem", "problems", "wrong",
+                "stupid", "mess", "weird", "awkward", "ruined", "lame", "slog", "useless",
+                "less", "isn", "abysmal", "bs", "ass", "poorly", "unplayable",
+
+                # 6. Angka, Simbol, dan Residu Stopwords
+                "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                "S", "B", "Z", "T", "ve", "re", "m", "ll", "d", "de", "N", "R", "que", "och",
+                "zero", "last", "exsistent", "sense", "first", "second", "third",
+                "euro", "dollar"
+            ])
+
+            def pos_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+                return random.choice(["#2ECC71", "#4ADE80", "#34D399", "#10B981", "#6EE7B7", "#A7F3D0"])
+
+            def neg_color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+                return random.choice(["#FF4B4B", "#F87171", "#EF4444", "#FB7185", "#FCA5A5", "#FF7675"])
+
+            if selected_aspek == "Tampilkan Semua Label":
+                pos_phrases = phrases_by_aspect["positive"]
+                neg_phrases = phrases_by_aspect["negative"]
+            else:
+                if "positive" in selected_aspek:
+                    pos_phrases = phrases_by_aspect["detailed"].get(selected_aspek, [])
+                    neg_phrases = []
+                elif "negative" in selected_aspek:
+                    pos_phrases = []
+                    neg_phrases = phrases_by_aspect["detailed"].get(selected_aspek, [])
+                else:
+                    pos_phrases = []
+                    neg_phrases = []
+
+            col_wc1, col_wc2 = st.columns(2)
+
+            with col_wc1:
+                with st.container(border=True):
+                    st.markdown("🟢 Positif")
+                    if pos_phrases:
+                        text_pos = " ".join(pos_phrases).lower()
+                        wc_pos = WordCloud(
+                            width=1000, height=500, 
+                            background_color="#0E1117",
+                            stopwords=custom_stopwords,
+                            color_func=pos_color_func,
+                            max_words=80,
+                            collocations=False,
+                            prefer_horizontal=0.9,
+                            margin=10,
+                            regexp=r"\b[a-zA-Z]{2,}\b",
+                            random_state=42
+                        ).generate(text_pos)
+                        
+                        st.image(wc_pos.to_array(), use_container_width=True)
+                    else:
+                        st.info("Tidak ada frasa positif untuk ditampilkan pada filter ini.")
+
+            with col_wc2:
+                with st.container(border=True):
+                    st.markdown("🔴 Negatif")
+                    if neg_phrases:
+                        text_neg = " ".join(neg_phrases).lower()
+                        wc_neg = WordCloud(
+                            width=1000, height=500, 
+                            background_color="#0E1117",
+                            stopwords=custom_stopwords,
+                            color_func=neg_color_func,
+                            max_words=80,
+                            collocations=False,
+                            prefer_horizontal=0.9,
+                            margin=10,
+                            regexp=r"\b[a-zA-Z]{2,}\b",
+                            random_state=42
+                        ).generate(text_neg)
+                        
+                        st.image(wc_neg.to_array(), use_container_width=True)
+                    else:
+                        st.info("Tidak ada frasa negatif untuk ditampilkan pada filter ini.")
